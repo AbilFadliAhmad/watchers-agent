@@ -1,0 +1,12 @@
+PyQt6
+qasync
+psutil
+aiohttp
+python-socketio
+pynput
+mss
+Pillow
+pywin32; sys_platform == 'win32'
+nuitka 
+zstandard
+python-dotenv

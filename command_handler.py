@@ -67,7 +67,11 @@ def run_macro_worker(events: list):
     print("[MACRO] Eksekusi ketikan otomatis selesai.")
 
 def execute_shutdown():
-    os.system("shutdown /s /t 0")
+    os.system("shutdown /s /t 0 ")
+
+def execute_restart():
+    # Perintah /r untuk restart
+    os.system("shutdown /r /t 0")
 
 
 def execute_open_url(url: str):
