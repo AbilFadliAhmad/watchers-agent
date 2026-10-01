@@ -1,8 +1,10 @@
 import io
 import mss
+from mss.exception import ScreenShotError
 import psutil
 from PIL import Image
 import win32gui
+import ctypes
 
 
 def get_open_windows() -> list[str]:
@@ -31,18 +33,39 @@ def get_system_telemetry() -> dict:
         "open_windows": get_open_windows(),
     }
 
+# Set DPI Awareness
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except Exception:
+    pass
+
+_sct_instance = None
+
 
 def capture_screen_bytes(quality=50, scale=(640, 360)) -> bytes:
-    """Mengambil screenshot langsung ke RAM buffer (format WebP)."""
-    with mss.MSS() as sct:
-        monitor = sct.monitors[1]  # Monitor Utama
-        sct_img = sct.grab(monitor)
+    global _sct_instance
 
-        # Konversi ke PIL Image & Resize
+    try:
+        if _sct_instance is None:
+            _sct_instance = mss.mss()
+
+        # Gunakan monitor utama [1] atau fall-back ke [0] jika monitors[1] bermasalah
+        monitor = (
+            _sct_instance.monitors[1]
+            if len(_sct_instance.monitors) > 1
+            else _sct_instance.monitors[0]
+        )
+        sct_img = _sct_instance.grab(monitor)
+
         img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
         img.thumbnail(scale)
 
-        # Buffer di RAM (io.BytesIO)
         ram_buffer = io.BytesIO()
         img.save(ram_buffer, format="WEBP", quality=quality)
         return ram_buffer.getvalue()
+
+    except (ScreenShotError, Exception) as e:
+        # Jika GDI melempar error, reset instance mss agar dibuat ulang di iterasi berikutnya
+        _sct_instance = None
+        # Kembalikan buffer kosong agar loop telemetri tetap berjalan tanpa membanting exception crash
+        return b""

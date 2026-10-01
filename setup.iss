@@ -1,9 +1,9 @@
 [Setup]
 AppName=Watchers Client Agent
-AppVersion=1.1.0
+AppVersion=1.3.0
 AppPublisher=Watchers Security
 DefaultDirName={commonappdata}\WatchersAgent
-OutputBaseFilename=WatchersAgent_SetupV12
+OutputBaseFilename=WatchersAgent_SetupV19
 Compression=lzma2/ultra64
 SolidCompression=yes
 PrivilegesRequired=admin
@@ -23,9 +23,9 @@ DisableFinishedPage=yes
 ; 1. Agent utama dalam bentuk Single File EXE
 Source: "dist\WatchersAgent.exe"; DestDir: "{app}"; Flags: ignoreversion
 
-; 2. File pendukung dari folder tools lokal (nssm.exe dan WatchdogWatchers.exe)
+; 2. File pendukung dari folder tools lokal (nssm.exe dan WatchersService.exe)
 Source: "tools\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "tools\WatchdogWatchers.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "tools\WatchersService.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; 3. Dependency C++ Redistributable
 Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
@@ -40,26 +40,6 @@ Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /passive /norestart";
 
 ; 2. Tambahkan Exclusion Path ke Windows Defender
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -NoProfile -Command Add-MpPreference -ExclusionPath '{app}'"; Flags: runhidden
-
-; 3. DAFTARKAN WATCHDOG SEBAGAI WINDOWS SERVICE
-Filename: "{app}\nssm.exe"; Parameters: "install WatchersWatchdog ""{app}\WatchdogWatchers.exe"""; Flags: runhidden
-Filename: "{app}\nssm.exe"; Parameters: "set WatchersWatchdog DisplayName ""Watchers Watchdog Service"""; Flags: runhidden
-Filename: "{app}\nssm.exe"; Parameters: "set WatchersWatchdog Description ""Memastikan WatchersAgent tetap berjalan di background sebelum dan sesudah login."""; Flags: runhidden
-Filename: "{app}\nssm.exe"; Parameters: "set WatchersWatchdog Start SERVICE_AUTO_START"; Flags: runhidden
-Filename: "{app}\nssm.exe"; Parameters: "set WatchersWatchdog AppExit Default Restart"; Flags: runhidden
-Filename: "{app}\nssm.exe"; Parameters: "start WatchersWatchdog"; Flags: runhidden
-
-; 4. DAFTARKAN TASK SCHEDULER SYSTEM BOOT
-Filename: "schtasks.exe"; Parameters: "/create /tn ""WatchersAgentSystemTask"" /tr ""'{app}\WatchersAgent.exe'"" /sc onstart /ru ""NT AUTHORITY\SYSTEM"" /rl highest /f"; Flags: runhidden
-
-; 5. DAFTARKAN TASK SCHEDULER USER LOGON
-Filename: "schtasks.exe"; Parameters: "/create /tn ""WatchersAgentUserTask"" /tr ""'{app}\WatchersAgent.exe'"" /sc onlogon /rl highest /f"; Flags: runhidden
-
-; 6. Daftarkan ke Windows Startup Registry (Fallback)
-Filename: "reg.exe"; Parameters: "add ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"" /v ""WatchersAgentAuto"" /t REG_SZ /d ""\""{app}\WatchersAgent.exe\"""" /f"; Flags: runhidden
-
-; 7. Eksekusi Seketika Setelah Instalasi
-Filename: "schtasks.exe"; Parameters: "/run /tn ""WatchersAgentSystemTask"""; Flags: runhidden
 
 [Code]
 var
@@ -86,10 +66,8 @@ procedure InitializeWizard();
 var
   LblProtocol, LblDomain: TLabel;
 begin
-  // Buat Halaman Kustom untuk Input Server URL
   ConfigPage := CreateCustomPage(wpWelcome, 'Konfigurasi Server Watchers', 'Masukkan alamat URL atau IP Server Dashboard Guru.');
 
-  // Label Pilih Protokol
   LblProtocol := TLabel.Create(ConfigPage);
   LblProtocol.Parent := ConfigPage.Surface;
   LblProtocol.Caption := 'Pilih Protokol Koneksi:';
@@ -97,7 +75,6 @@ begin
   LblProtocol.Top := 8;
   LblProtocol.Font.Style := [fsBold];
 
-  // Dropdown Selection (https:// vs http://)
   ProtocolCombo := TComboBox.Create(ConfigPage);
   ProtocolCombo.Parent := ConfigPage.Surface;
   ProtocolCombo.Style := csDropDownList;
@@ -108,7 +85,6 @@ begin
   ProtocolCombo.Top := LblProtocol.Top + LblProtocol.Height + 6;
   ProtocolCombo.Width := 120;
 
-  // Label Input Domain/IP
   LblDomain := TLabel.Create(ConfigPage);
   LblDomain.Parent := ConfigPage.Surface;
   LblDomain.Caption := 'Domain atau IP Server (Contoh: agent.tebaslahandev.my.id atau 192.168.1.100:8000):';
@@ -116,25 +92,26 @@ begin
   LblDomain.Top := ProtocolCombo.Top + ProtocolCombo.Height + 16;
   LblDomain.Font.Style := [fsBold];
 
-  // Input Box Domain / IP
   DomainEdit := TNewEdit.Create(ConfigPage);
   DomainEdit.Parent := ConfigPage.Surface;
-  DomainEdit.Text := 'agent.tebaslahandev.my.id'; // Default value
+  DomainEdit.Text := 'watchers.tebaslahandev.my.id';
   DomainEdit.Left := 0;
   DomainEdit.Top := LblDomain.Top + LblDomain.Height + 6;
   DomainEdit.Width := ConfigPage.SurfaceWidth;
 end;
 
 // ================================================================
-// PENULISAN CONFIG.JSON SETELAH PROSES INSTALL SELESAI
+// EKSEKUSI BERURUTAN SETELAH FILE DIEKSTRAKSI
 // ================================================================
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ProtocolStr, DomainStr, FullUrl, ConfigPath, JsonContent: string;
+  AppExePath, NssmPath, WatchersServiceExe: string;
+  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
-    // Ambil nilai protokol
+    // 1. TULIS FILE CONFIG.JSON TERLEBIH DAHULU
     if ProtocolCombo.ItemIndex = 1 then
       ProtocolStr := 'http://'
     else
@@ -142,26 +119,36 @@ begin
 
     DomainStr := Trim(DomainEdit.Text);
 
-    // Hapus awalan http:// atau https:// jika pengguna tidak sengaja mengetiknya
     if Pos('http://', DomainStr) = 1 then
       Delete(DomainStr, 1, 7);
     if Pos('https://', DomainStr) = 1 then
       Delete(DomainStr, 1, 8);
 
-    // Gabungkan menjadi Full URL
     FullUrl := ProtocolStr + DomainStr;
-
-    // Lokasi config.json di C:\ProgramData\WatchersAgent\config.json
     ConfigPath := ExpandConstant('{app}\config.json');
 
-    // Format isi JSON
     JsonContent := '{' + #13#10 +
                    '    "SERVER_URL": "' + FullUrl + '",' + #13#10 +
                    '    "RECONNECT_INTERVAL": 3' + #13#10 +
                    '}';
 
-    // Simpan file config.json
     SaveStringToFile(ConfigPath, JsonContent, False);
+
+    // Variabel Path Aplikasi
+    AppExePath := ExpandConstant('{app}\WatchersAgent.exe');
+    NssmPath := ExpandConstant('{app}\nssm.exe');
+    WatchersServiceExe := ExpandConstant('{app}\WatchersService.exe');
+
+    // 2. DAFTARKAN TASK SCHEDULER INTERAKTIF (Gunakan petik ganda ter-escape)
+    Exec('schtasks.exe', '/create /tn "WatchersAgentTask" /tr "' + AppExePath + '" /sc ONLOGON /rl highest /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // 3. DAFTARKAN & JALANKAN WATCHERS SERVICE SETELAH CONFIG.JSON DIPASTIKAN ADA
+    Exec(NssmPath, 'install WatchersService "' + WatchersServiceExe + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(NssmPath, 'set WatchersService DisplayName "Watchers Background Service"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(NssmPath, 'set WatchersService Description "Memastikan WatchersAgent tetap berjalan di Session 1."', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(NssmPath, 'set WatchersService Start SERVICE_AUTO_START', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(NssmPath, 'set WatchersService AppExit Default Restart', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(NssmPath, 'start WatchersService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
 
@@ -173,22 +160,16 @@ var
   ResultCode: Integer;
 begin
   // 1. Hentikan & hapus Service NSSM
-  Exec('net.exe', 'stop WatchersWatchdog', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('sc.exe', 'delete WatchersWatchdog', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('net.exe', 'stop WatchersService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'delete WatchersService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('net.exe', 'stop WinSecurityBroker', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('sc.exe', 'delete WinSecurityBroker', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 2. Hapus Task Scheduler (System Boot & User Logon)
+  // 2. Hapus Task Scheduler
   Exec('schtasks.exe', '/delete /tn "WatchersAgentTask" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('schtasks.exe', '/delete /tn "WatchersAgentSystemTask" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('schtasks.exe', '/delete /tn "WatchersAgentUserTask" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('schtasks.exe', '/delete /tn "WatchersWatchdogTask" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 3. Hapus Auto-Run Registry Windows
-  Exec('reg.exe', 'delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "WatchersAgentAuto" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // 4. Matikan semua proses aktif
-  Exec('taskkill.exe', '/F /T /IM WatchdogWatchers.exe /IM WatchersAgent.exe /IM nssm.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // 3. Matikan semua proses aktif
+  Exec('taskkill.exe', '/F /T /IM WatchersService.exe /IM WatchersAgent.exe /IM nssm.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   Sleep(1500);
 end;

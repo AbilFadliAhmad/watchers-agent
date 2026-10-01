@@ -1,1 +1,1 @@
-python -m nuitka --standalone --onefile --windows-disable-console --enable-plugin=pyqt6 --assume-yes-for-downloads --output-dir=dist --output-filename=WatchersAgent.exe --windows-uac-admin main.py
+python -m nuitka --standalone --onefile --windows-disable-console --enable-plugin=pyqt6 --assume-yes-for-downloads --output-dir=dist --output-filename=WatchersAgent.exe --windows-uac-admin --remove-output main.py
