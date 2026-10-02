@@ -29,7 +29,7 @@ def render_svg_icon(svg_str: str, size: int = 24) -> QIcon:
     return QIcon(pixmap)
 
 # --- GLOBAL VARIABLES ---
-hook_id = None  # Inisialisasi variabel global
+hook_id = None
 
 # --- WINDOWS API CONSTANTS & HOOK ---
 user32 = ctypes.windll.user32
@@ -46,12 +46,11 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
     ]
 
 
-# 1. Definisikan prototype HOOKPROC
 HOOKPROC = ctypes.WINFUNCTYPE(
     ctypes.c_int, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
 )
 
-# 2. Atur argtypes dan restype untuk SetWindowsHookExW & UnhookWindowsHookEx
+# 1. Tentukan argtypes & restype secara eksplisit (mencegah OverflowError 64-bit)
 user32.SetWindowsHookExW.argtypes = [
     ctypes.c_int,
     HOOKPROC,
@@ -63,50 +62,50 @@ user32.SetWindowsHookExW.restype = wintypes.HHOOK
 user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
 user32.UnhookWindowsHookEx.restype = wintypes.BOOL
 
+user32.CallNextHookEx.argtypes = [
+    wintypes.HHOOK,
+    ctypes.c_int,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+]
+user32.CallNextHookEx.restype = ctypes.c_longlong
 
-# 3. Callback Python dengan Filter VK Code
+# 2. DAFTAR TOMBOL YANG DIBLOKIR (BLACK_LIST)
+# Menggunakan set {} untuk pencarian instan O(1)
+BLOCKED_KEYS = {
+    0x09,  # Tab (VK_TAB)
+    0x1B,  # Esc (VK_ESCAPE)
+    0x12,  # Alt (VK_MENU)
+    0xA4,  # Left Alt (VK_LMENU)
+    0xA5,  # Right Alt (VK_RMENU)
+    0x5B,  # Left Windows Key (VK_LWIN)
+    0x5C,  # Right Windows Key (VK_RWIN)
+}
+
+
 def low_level_keyboard_proc(nCode, wParam, lParam):
-    if nCode >= 0:
-        # Cast lParam menjadi pointer ke KBDLLHOOKSTRUCT
-        kb_struct = ctypes.cast(
-            lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)
-        ).contents
-        vk_code = kb_struct.vkCode
+    if nCode < 0:
+        return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-        # Filter Kategori Tombol yang DIIZINKAN:
-        is_digit = (0x30 <= vk_code <= 0x39) or (
-            0x60 <= vk_code <= 0x69
-        )  # Angka 0-9 (Utama & Numpad)
-        is_letter = 0x41 <= vk_code <= 0x5A  # Huruf A-Z
+    # Pembacaan memori langsung via pointer C (Tanpa ctypes.cast yang lambat)
+    vk_code = KBDLLHOOKSTRUCT.from_address(lParam).vkCode
 
-        # Tombol pendukung pengetikan kata sandi yang WAJIB diloloskan:
-        is_typing_helper = vk_code in (
-            0x08,  # Backspace (VK_BACK) -> Untuk menghapus karakter jika salah
-            0x0D,  # Enter (VK_RETURN)   -> Untuk submit/verifikasi password
-            0x20,  # Spacebar (VK_SPACE) -> Spasi
-            0x10,
-            0xA0,
-            0xA1,  # Shift (Left/Right)  -> Karakter/Huruf Kapital
-            0x14,  # Caps Lock           -> Toggle Kapital
-        )
+    # Blokir HANYA jika tombol adalah:
+    # 1. F1 sampai F12 (VK_F1: 0x70 s/d VK_F12: 0x7B)
+    # 2. Tab, Esc, Alt, atau Windows Key (di dalam BLOCKED_KEYS)
+    if (0x70 <= vk_code <= 0x7B) or (vk_code in BLOCKED_KEYS):
+        return 1  # Stop pemrosesan (BLOKIR)
 
-        # Jika tombol termasuk huruf, angka, atau pendukung ketik -> Teruskan ke OS (IZINKAN)
-        if is_digit or is_letter or is_typing_helper:
-            return user32.CallNextHookEx(None, nCode, wParam, lParam)
-
-        # Blokir semua tombol shortcut sistem lainnya (Alt, Tab, Win Key, Ctrl, Esc, F1-F12)
-        return 1
-
+    # Izinkan SELURUH tombol lainnya (Huruf, Angka, Symbol, Shift, Enter, Backspace, Space, dll)
     return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
 
-# 4. Simpan di variabel global agar tidak terkena Garbage Collector
+# 3. Simpan callback agar tidak di-Garbage Collect oleh Python
 c_keyboard_callback = HOOKPROC(low_level_keyboard_proc)
 
 
 def start_keyboard_hook():
     global hook_id
-
     hook_id = user32.SetWindowsHookExW(
         WH_KEYBOARD_LL, c_keyboard_callback, None, 0
     )

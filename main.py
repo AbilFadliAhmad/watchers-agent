@@ -50,6 +50,21 @@ AGENT_CONFIG = {
     }
 
 # --- HELPER FUNCTION ---
+def fix_environment():
+    """Memaksa Working Directory pindah ke lokasi WatchersAgent.exe berada
+
+    sehingga eksekusi via schtasks identik dengan double-click manual.
+    """
+    if getattr(sys, "frozen", False):
+        # Jika sudah di-build menjadi .exe
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        # Jika masih script .py
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Pindahkan Working Directory dari C:\Windows\System32 ke C:\ProgramData\WatchersAgent
+    os.chdir(app_dir)
+
 def safe_cleanup_widget(widget):
     if widget is not None and not isdeleted(widget):
         try:
@@ -378,6 +393,8 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Memastikan ekskusi kode di file itu berada di program data
+    fix_environment()
     # 1. Mode GUI Pengaturan Server (Jalankan secara synchronous tanpa qasync)
     if len(sys.argv) > 1 and sys.argv[1] == "--config":
         app = QApplication(sys.argv)

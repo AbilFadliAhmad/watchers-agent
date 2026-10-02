@@ -1,4 +1,5 @@
 import io
+import socket
 import mss
 from mss.exception import ScreenShotError
 import psutil
@@ -42,14 +43,35 @@ except Exception:
 _sct_instance = None
 
 
+def request_frame_from_service() -> bytes:
+    """Meminta bytes gambar Winlogon dari WatchersService (SYSTEM) via Local Socket."""
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.settimeout(1.0)
+        client.connect(("127.0.0.1", 58888))
+        client.sendall(b"GET_WINLOGON_FRAME")
+
+        data = b""
+        while True:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+
+        client.close()
+        return data
+    except Exception:
+        return b""
+
+
 def capture_screen_bytes(quality=50, scale=(640, 360)) -> bytes:
     global _sct_instance
 
+    # 1. Coba capture normal menggunakan mss (Sangat cepat di Desktop)
     try:
         if _sct_instance is None:
             _sct_instance = mss.mss()
 
-        # Gunakan monitor utama [1] atau fall-back ke [0] jika monitors[1] bermasalah
         monitor = (
             _sct_instance.monitors[1]
             if len(_sct_instance.monitors) > 1
@@ -64,8 +86,22 @@ def capture_screen_bytes(quality=50, scale=(640, 360)) -> bytes:
         img.save(ram_buffer, format="WEBP", quality=quality)
         return ram_buffer.getvalue()
 
-    except (ScreenShotError, Exception) as e:
-        # Jika GDI melempar error, reset instance mss agar dibuat ulang di iterasi berikutnya
+    except (ScreenShotError, Exception):
+        # 2. Jika mss gagal (saat Winlogon / Lock Screen), reset instance mss
         _sct_instance = None
-        # Kembalikan buffer kosong agar loop telemetri tetap berjalan tanpa membanting exception crash
+
+        # 3. Fallback: Ambil dari WatchersService (Winlogon / Lock Screen)
+        try:
+            raw_bytes = request_frame_from_service()
+            if raw_bytes:
+                img = Image.open(io.BytesIO(raw_bytes))
+                img.thumbnail(scale)
+
+                ram_buffer = io.BytesIO()
+                img.save(ram_buffer, format="WEBP", quality=quality)
+                return ram_buffer.getvalue()
+        except Exception:
+            pass
+
+        # 4. PASTIKAN SELALU MENGEMBALIKAN b"" JIKA GAGAL (BUKAN None)
         return b""

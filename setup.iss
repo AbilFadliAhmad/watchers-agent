@@ -3,7 +3,7 @@ AppName=Watchers Client Agent
 AppVersion=1.3.0
 AppPublisher=Watchers Security
 DefaultDirName={commonappdata}\WatchersAgent
-OutputBaseFilename=WatchersAgent_SetupV19
+OutputBaseFilename=WatchersAgent_SetupV20
 Compression=lzma2/ultra64
 SolidCompression=yes
 PrivilegesRequired=admin
@@ -41,11 +41,14 @@ Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /passive /norestart";
 ; 2. Tambahkan Exclusion Path ke Windows Defender
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -NoProfile -Command Add-MpPreference -ExclusionPath '{app}'"; Flags: runhidden
 
+
+
 [Code]
 var
   ConfigPage: TWizardPage;
   ProtocolCombo: TComboBox;
   DomainEdit: TNewEdit;
+  DisableSleepCheck: TNewCheckBox;
 
 // ================================================================
 // Check VC++ Installed
@@ -60,7 +63,7 @@ begin
 end;
 
 // ================================================================
-// INISIALISASI HALAMAN INPUT SERVER URL
+// INISIALISASI HALAMAN INPUT SERVER URL & OPSI SLEEP
 // ================================================================
 procedure InitializeWizard();
 var
@@ -98,6 +101,48 @@ begin
   DomainEdit.Left := 0;
   DomainEdit.Top := LblDomain.Top + LblDomain.Height + 6;
   DomainEdit.Width := ConfigPage.SurfaceWidth;
+
+  // CHECKBOX OPSI MENCEGAH SLEEP
+  DisableSleepCheck := TNewCheckBox.Create(ConfigPage);
+  DisableSleepCheck.Parent := ConfigPage.Surface;
+  DisableSleepCheck.Caption := 'Matikan Fitur Sleep & Sembunyikan Tombol Sleep di Start Menu';
+  DisableSleepCheck.Left := 0;
+  DisableSleepCheck.Top := DomainEdit.Top + DomainEdit.Height + 16;
+  DisableSleepCheck.Width := ConfigPage.SurfaceWidth;
+  DisableSleepCheck.Checked := True; // Default tercentang
+end;
+
+// ================================================================
+// FUNGSI MATIKAN SLEEP & SEMBUNYIKAN TOMBOL SLEEP
+// ================================================================
+procedure ApplyNoSleepSettings();
+var
+  ResultCode: Integer;
+begin
+  // Set Timeout Layar & Standby menjadi 0 (Tidak pernah sleep)
+  Exec('powercfg.exe', '/change monitor-timeout-ac 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('powercfg.exe', '/change standby-timeout-ac 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('powercfg.exe', '/change hibernate-timeout-ac 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Sembunyikan Tombol "Sleep" di Start Menu / Power Menu Windows
+  RegWriteDWordValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FlyoutMenuSettings', 'ShowSleepOption', 0);
+  RegWriteDWordValue(HKLM, 'SOFTWARE\Policies\Microsoft\Windows\Explorer', 'ShowSleepOption', 0);
+end;
+
+// ================================================================
+// FUNGSI PEMULIHAN PENGATURAN SLEEP
+// ================================================================
+procedure RestoreSleepSettings();
+var
+  ResultCode: Integer;
+begin
+  // Kembalikan Timeout Layar ke 15 Menit & Standby ke 30 Menit (Standar OS)
+  Exec('powercfg.exe', '/change monitor-timeout-ac 15', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('powercfg.exe', '/change standby-timeout-ac 30', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Tampilkan kembali Tombol "Sleep" di Start Menu Windows
+  RegWriteDWordValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FlyoutMenuSettings', 'ShowSleepOption', 1);
+  RegDeleteValue(HKLM, 'SOFTWARE\Policies\Microsoft\Windows\Explorer', 'ShowSleepOption');
 end;
 
 // ================================================================
@@ -134,15 +179,21 @@ begin
 
     SaveStringToFile(ConfigPath, JsonContent, False);
 
+    // 2. TERAPKAN PENGATURAN ANTI-SLEEP JIKA CHECKBOX DICENTANG
+    if DisableSleepCheck.Checked then
+    begin
+      ApplyNoSleepSettings();
+    end;
+
     // Variabel Path Aplikasi
     AppExePath := ExpandConstant('{app}\WatchersAgent.exe');
     NssmPath := ExpandConstant('{app}\nssm.exe');
     WatchersServiceExe := ExpandConstant('{app}\WatchersService.exe');
 
-    // 2. DAFTARKAN TASK SCHEDULER INTERAKTIF (Gunakan petik ganda ter-escape)
-    Exec('schtasks.exe', '/create /tn "WatchersAgentTask" /tr "' + AppExePath + '" /sc ONLOGON /rl highest /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // 3. DAFTARKAN TASK SCHEDULER INTERAKTIF
+    Exec('schtasks.exe', '/create /tn "WatchersAgentTask" /tr "' + AppExePath + '" /sc ONCE /st 00:00 /rl highest /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    // 3. DAFTARKAN & JALANKAN WATCHERS SERVICE SETELAH CONFIG.JSON DIPASTIKAN ADA
+    // 4. DAFTARKAN & JALANKAN WATCHERS SERVICE SETELAH CONFIG.JSON DIPASTIKAN ADA
     Exec(NssmPath, 'install WatchersService "' + WatchersServiceExe + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(NssmPath, 'set WatchersService DisplayName "Watchers Background Service"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(NssmPath, 'set WatchersService Description "Memastikan WatchersAgent tetap berjalan di Session 1."', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -170,6 +221,9 @@ begin
 
   // 3. Matikan semua proses aktif
   Exec('taskkill.exe', '/F /T /IM WatchersService.exe /IM WatchersAgent.exe /IM nssm.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 4. KEMBALIKAN PENGATURAN SLEEP KE NORMAL
+  RestoreSleepSettings();
 
   Sleep(1500);
 end;
