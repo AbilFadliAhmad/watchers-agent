@@ -4,28 +4,34 @@ import sys
 import webbrowser
 import time
 import socket
+from agent_logger import log_info, log_error
+from pynput import keyboard
 
-# Helper Function Run Macro Worker
-def send_key_event_to_service(key_str: str, action: str) -> bool:
-    """Mengirim event tombol ke WatchersService via socket lokal."""
-    try:
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.settimeout(1.0)
-        client.connect(("127.0.0.1", 58888))
+# Inisialisasi Controller Keyboard pynput
+kb = keyboard.Controller()
+# Pemetaan (Mapping) Nama Key dari JavaScript ke Objek pynput.keyboard.Key
+SPECIAL_KEYS = {
+    "Key.ctrl": keyboard.Key.ctrl_l,
+    "Key.shift": keyboard.Key.shift_l,
+    "Key.alt": keyboard.Key.alt_l,
+    "Key.cmd": keyboard.Key.cmd,
+    "Key.enter": keyboard.Key.enter,
+    "Key.backspace": keyboard.Key.backspace,
+    "Key.tab": keyboard.Key.tab,
+    "Key.esc": keyboard.Key.esc,
+    "Key.right": keyboard.Key.right,
+    "Key.left": keyboard.Key.left,
+    "Key.up": keyboard.Key.up,
+    "Key.down": keyboard.Key.down,
+    "Space": keyboard.Key.space,
+    " ": keyboard.Key.space,
+}
 
-        # Format pesan: INJECT_KEY:<key_str>:<action>
-        payload = f"INJECT_KEY:{key_str}:{action}"
-        client.sendall(payload.encode("utf-8"))
-        client.close()
-        return True
-    except Exception as e:
-        print(f"[MACRO SOCKET ERROR] Gagal mengirim event tombol: {e}")
-        return False
 
 def run_macro_worker(events: list):
-    """Worker makro yang meneruskan eksekusi ketikan ke WatchersService."""
+    """Worker fungsi yang berjalan di thread terpisah untuk mengeksekusi urutan tombol."""
     print(
-        f"[MACRO] Memulai eksekusi {len(events)} event ketikan via Service..."
+        f"[MACRO] Memulai eksekusi {len(events)} event ketikan otomatis..."
     )
 
     for event in events:
@@ -33,17 +39,34 @@ def run_macro_worker(events: list):
         key_str = event.get("key", "")
         action = event.get("action", "press")
 
-        # 1. Jeda waktu
+        # 1. Terapkan jeda waktu (delay)
         if delay > 0:
             time.sleep(delay)
 
         if not key_str:
             continue
 
-        # 2. Kirim event ke WatchersService (SYSTEM)
-        send_key_event_to_service(key_str, action)
+        # 2. Tentukan Objek Key (Tombol Spesial vs Karakter Biasa)
+        if key_str in SPECIAL_KEYS:
+            key_obj = SPECIAL_KEYS[key_str]
+        elif key_str.startswith("Key."):
+            # Fallback dinamis untuk tombol pynput lainnya
+            attr_name = key_str.replace("Key.", "")
+            key_obj = getattr(keyboard.Key, attr_name, key_str)
+        else:
+            # Karakter biasa (a-z, 0-9, simbol)
+            key_obj = key_str
 
-    print("[MACRO] Eksekusi makro selesai.")
+        # 3. Simulasi Penekanan / Pelepasan Tombol
+        try:
+            if action == "press":
+                kb.press(key_obj)
+            elif action == "release":
+                kb.release(key_obj)
+        except Exception as e:
+            print(f"[MACRO ERROR] Gagal menekan '{key_str}': {e}")
+
+    print("[MACRO] Eksekusi ketikan otomatis selesai.")
 
 # Helper Function shutdown & restart
 def send_ipc_command(command: str) -> bool:
@@ -54,10 +77,13 @@ def send_ipc_command(command: str) -> bool:
         client.settimeout(2.0)
         client.connect(("127.0.0.1", 58888))
         client.sendall(command.encode("utf-8"))
+        client.shutdown(socket.SHUT_WR)
+
         client.close()
-        print(f"[✓] Berhasil mengirim sinyal IPC: {command}")
+        log_info(f"[✓] Berhasil mengirim sinyal IPC: {command}")
         return True
     except Exception as e:
+        log_error(f"[!] Gagal menghubungi WatchersService via IPC: {e}")
         print(f"[!] Gagal menghubungi WatchersService via IPC: {e}")
         return False
 

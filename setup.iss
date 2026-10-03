@@ -3,7 +3,7 @@ AppName=Watchers Client Agent
 AppVersion=1.3.0
 AppPublisher=Watchers Security
 DefaultDirName={commonappdata}\WatchersAgent
-OutputBaseFilename=WatchersAgent_SetupV20
+OutputBaseFilename=WatchersAgent_SetupV25
 Compression=lzma2/ultra64
 SolidCompression=yes
 PrivilegesRequired=admin
@@ -63,6 +63,40 @@ begin
 end;
 
 // ================================================================
+// FUNGSI PEMBERSIH SELEKTIF (HAPUS SEMUA KECUALI config.json)
+// ================================================================
+procedure CleanFolderExceptConfig();
+var
+  FindRec: TFindRec;
+  AppDir, ItemPath: string;
+begin
+  AppDir := ExpandConstant('{commonappdata}\WatchersAgent');
+  if DirExists(AppDir) then
+  begin
+    if FindFirst(AppDir + '\*', FindRec) then
+    begin
+      try
+        repeat
+          // Abaikan folder '.' dan '..' serta file 'config.json'
+          if (FindRec.Name <> '.') and (FindRec.Name <> '..') and (CompareText(FindRec.Name, 'config.json') <> 0) then
+          begin
+            ItemPath := AppDir + '\' + FindRec.Name;
+            
+            // Jika folder, hapus beserta isinya; Jika file, hapus langsung
+            if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+              DelTree(ItemPath, True, True, True)
+            else
+              DeleteFile(ItemPath);
+          end;
+        until not FindNext(FindRec);
+      finally
+        FindClose(FindRec);
+      end;
+    end;
+  end;
+end;
+
+// ================================================================
 // INISIALISASI HALAMAN INPUT SERVER URL & OPSI SLEEP
 // ================================================================
 procedure InitializeWizard();
@@ -119,12 +153,10 @@ procedure ApplyNoSleepSettings();
 var
   ResultCode: Integer;
 begin
-  // Set Timeout Layar & Standby menjadi 0 (Tidak pernah sleep)
   Exec('powercfg.exe', '/change monitor-timeout-ac 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('powercfg.exe', '/change standby-timeout-ac 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('powercfg.exe', '/change hibernate-timeout-ac 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // Sembunyikan Tombol "Sleep" di Start Menu / Power Menu Windows
   RegWriteDWordValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FlyoutMenuSettings', 'ShowSleepOption', 0);
   RegWriteDWordValue(HKLM, 'SOFTWARE\Policies\Microsoft\Windows\Explorer', 'ShowSleepOption', 0);
 end;
@@ -136,11 +168,9 @@ procedure RestoreSleepSettings();
 var
   ResultCode: Integer;
 begin
-  // Kembalikan Timeout Layar ke 15 Menit & Standby ke 30 Menit (Standar OS)
   Exec('powercfg.exe', '/change monitor-timeout-ac 15', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('powercfg.exe', '/change standby-timeout-ac 30', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // Tampilkan kembali Tombol "Sleep" di Start Menu Windows
   RegWriteDWordValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FlyoutMenuSettings', 'ShowSleepOption', 1);
   RegDeleteValue(HKLM, 'SOFTWARE\Policies\Microsoft\Windows\Explorer', 'ShowSleepOption');
 end;
@@ -156,28 +186,32 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    // 1. TULIS FILE CONFIG.JSON TERLEBIH DAHULU
-    if ProtocolCombo.ItemIndex = 1 then
-      ProtocolStr := 'http://'
-    else
-      ProtocolStr := 'https://';
-
-    DomainStr := Trim(DomainEdit.Text);
-
-    if Pos('http://', DomainStr) = 1 then
-      Delete(DomainStr, 1, 7);
-    if Pos('https://', DomainStr) = 1 then
-      Delete(DomainStr, 1, 8);
-
-    FullUrl := ProtocolStr + DomainStr;
     ConfigPath := ExpandConstant('{app}\config.json');
 
-    JsonContent := '{' + #13#10 +
-                   '    "SERVER_URL": "' + FullUrl + '",' + #13#10 +
-                   '    "RECONNECT_INTERVAL": 3' + #13#10 +
-                   '}';
+    // 1. TULIS CONFIG.JSON HANYA JIKA FILE BELUM ADA
+    if not FileExists(ConfigPath) then
+    begin
+      if ProtocolCombo.ItemIndex = 1 then
+        ProtocolStr := 'http://'
+      else
+        ProtocolStr := 'https://';
 
-    SaveStringToFile(ConfigPath, JsonContent, False);
+      DomainStr := Trim(DomainEdit.Text);
+
+      if Pos('http://', DomainStr) = 1 then
+        Delete(DomainStr, 1, 7);
+      if Pos('https://', DomainStr) = 1 then
+        Delete(DomainStr, 1, 8);
+
+      FullUrl := ProtocolStr + DomainStr;
+
+      JsonContent := '{' + #13#10 +
+                     '    "SERVER_URL": "' + FullUrl + '",' + #13#10 +
+                     '    "RECONNECT_INTERVAL": 3' + #13#10 +
+                     '}';
+
+      SaveStringToFile(ConfigPath, JsonContent, False);
+    end;
 
     // 2. TERAPKAN PENGATURAN ANTI-SLEEP JIKA CHECKBOX DICENTANG
     if DisableSleepCheck.Checked then
@@ -193,7 +227,7 @@ begin
     // 3. DAFTARKAN TASK SCHEDULER INTERAKTIF
     Exec('schtasks.exe', '/create /tn "WatchersAgentTask" /tr "' + AppExePath + '" /sc ONCE /st 00:00 /rl highest /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    // 4. DAFTARKAN & JALANKAN WATCHERS SERVICE SETELAH CONFIG.JSON DIPASTIKAN ADA
+    // 4. DAFTARKAN & JALANKAN WATCHERS SERVICE
     Exec(NssmPath, 'install WatchersService "' + WatchersServiceExe + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(NssmPath, 'set WatchersService DisplayName "Watchers Background Service"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(NssmPath, 'set WatchersService Description "Memastikan WatchersAgent tetap berjalan di Session 1."', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -229,18 +263,13 @@ begin
 end;
 
 function InitializeSetup(): Boolean;
-var
-  AppDir: string;
-  ResultCode: Integer;
 begin
   Result := True;
+  // Hentikan service & proses
   StopAndCleanupEverything();
 
-  AppDir := ExpandConstant('{commonappdata}\WatchersAgent');
-  if DirExists(AppDir) then
-  begin
-    Exec('cmd.exe', '/c rmdir /s /q "' + AddQuotes(AppDir) + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
+  // Hapus semua file/folder di folder aplikasi KECUALI config.json
+  CleanFolderExceptConfig();
 end;
 
 function InitializeUninstall(): Boolean;

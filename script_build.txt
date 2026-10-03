@@ -1,1 +1,26 @@
-python -m nuitka --standalone --onefile --windows-disable-console --enable-plugin=pyqt6 --assume-yes-for-downloads --output-dir=dist --output-filename=WatchersAgent.exe --windows-uac-admin --remove-output main.py
+python -m nuitka --standalone --onefile --windows-disable-console --enable-plugin=pyqt6 --assume-yes-for-downloads --output-dir=dist --output-filename=WatchersAgent.exe --windows-uac-admin --remove-output ^
+  --nofollow-import-to=tkinter ^
+  --nofollow-import-to=_tkinter ^
+  --nofollow-import-to=PIL.ImageTk ^
+  --nofollow-import-to=PIL.TiffImagePlugin ^
+  --nofollow-import-to=PIL.PdfImagePlugin ^
+  --nofollow-import-to=PIL.PsdImagePlugin ^
+  --nofollow-import-to=PIL.GifImagePlugin ^
+  --nofollow-import-to=PIL.EpsImagePlugin ^
+  --nofollow-import-to=PIL.IcoImagePlugin ^
+  --nofollow-import-to=PIL.DxfImagePlugin ^
+  --nofollow-import-to=PIL.PcxImagePlugin ^
+  --nofollow-import-to=PIL.FliImagePlugin ^
+  --nofollow-import-to=PIL.GbrImagePlugin ^
+  --nofollow-import-to=PIL.ImtImagePlugin ^
+  --nofollow-import-to=PIL.MicImagePlugin ^
+  --nofollow-import-to=PIL.SpiderImagePlugin ^
+  --nofollow-import-to=PIL.MpoImagePlugin ^
+  --nofollow-import-to=PIL.XvThumbImagePlugin ^
+  --nofollow-import-to=PIL.SgiImagePlugin ^
+  --nofollow-import-to=PIL.SunImagePlugin ^
+  --nofollow-import-to=PIL.WmfImagePlugin ^
+  --nofollow-import-to=PIL.XbmImagePlugin ^
+  --nofollow-import-to=unittest ^
+  --nofollow-import-to=pydoc ^
+  main.py

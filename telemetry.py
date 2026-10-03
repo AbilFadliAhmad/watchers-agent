@@ -25,7 +25,6 @@ def get_open_windows() -> list[str]:
     except Exception:
         return []
 
-
 def get_system_telemetry() -> dict:
     """Mengambil data beban CPU, RAM, dan daftar aplikasi yang dibuka client."""
     return {
@@ -62,7 +61,6 @@ def request_frame_from_service() -> bytes:
         return data
     except Exception:
         return b""
-
 
 def capture_screen_bytes(quality=50, scale=(640, 360)) -> bytes:
     global _sct_instance
