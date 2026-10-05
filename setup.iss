@@ -1,9 +1,16 @@
+
+; ================================================================
+; DEFINISI VERSI APLIKASI
+; ================================================================
+#define AppVer "1.3.0"
+#define AppArch "x64"
+
 [Setup]
 AppName=Watchers Client Agent
 AppVersion=1.3.0
 AppPublisher=Watchers Security
 DefaultDirName={commonappdata}\WatchersAgent
-OutputBaseFilename=WatchersAgent_SetupV25
+OutputBaseFilename=WatchersAgent_SetupV26
 Compression=lzma2/ultra64
 SolidCompression=yes
 PrivilegesRequired=admin

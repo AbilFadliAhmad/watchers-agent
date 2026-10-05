@@ -11,6 +11,7 @@ CONFIG_FILE_PATH = os.path.join(PROGRAM_DATA_DIR, "config.json")
 DEFAULT_CONFIG = {
     "SERVER_URL": "https://agent.tebaslahandev.my.id",
     "RECONNECT_INTERVAL": 3,
+    "VERSION": "0.0.0"
 }
 
 

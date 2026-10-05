@@ -38,6 +38,8 @@ sio = socketio.AsyncClient(
 )
 
 SERVER_URL = "https://agent.tebaslahandev.my.id"
+AGENT_VERSION = "0.0.0"
+PERCENTAGE_DOWNLOADED = 0
 PC_NAME = socket.gethostname()
 CURRENT_MODE = "grid"
 lock_widget = None
@@ -64,7 +66,6 @@ def fix_environment():
 
     # Pindahkan Working Directory dari C:\Windows\System32 ke C:\ProgramData\WatchersAgent
     os.chdir(app_dir)
-
 def safe_cleanup_widget(widget):
     if widget is not None and not isdeleted(widget):
         try:
@@ -73,7 +74,6 @@ def safe_cleanup_widget(widget):
         except RuntimeError:
             pass
     return None
-
 # --- EXTRACT UNIQUE DEVICE ID ---
 def get_c_drive_serial() -> str:
     """Fallback 2: Mengambil Volume Serial Number dari Drive C: via Windows API (ctypes)."""
@@ -92,7 +92,6 @@ def get_c_drive_serial() -> str:
         return f"VOL-{hex(volume_serial_number.value)[2:].upper()}"
     except Exception:
         return ""
-
 def get_system_uuid() -> str:
     """Fallback 1: Mengambil System UUID dari BIOS/Motherboard via PowerShell CIM."""
     try:
@@ -103,7 +102,6 @@ def get_system_uuid() -> str:
     except Exception:
         pass
     return ""
-
 def get_hardware_id() -> str:
     """Mengekstrak ID Unik Perangkat dengan hirarki fallback yang persistent:
 
@@ -155,7 +153,6 @@ async def connect():
     except Exception as e:
         log_error("Gagal mengirim event register_student", exc=e)
 
-
 @sio.event
 async def disconnect():
     msg = "[!] Terputus dari Server Guru. Menunggu auto-reconnect..."
@@ -167,7 +164,6 @@ async def connect_error(data):
     msg = f"[!] Gagal terhubung ke server SocketIO: {data}"
     print(msg, flush=True)
     log_error(msg)
-
 
 @sio.on("update_config") # type: ignore
 async def on_update_config(data):
@@ -190,7 +186,35 @@ async def on_update_config(data):
             "scale": tuple(data["fullscreen"]["scale"]),
             "interval": float(data["fullscreen"]["interval"]),
         }
-        
+
+@sio.on("trigger_update")
+def on_trigger_update(data):
+    """Menerima event update dari Socket IO, meneruskannya ke WatchersService,
+
+    dan memperbarui variabel percentage_downloaded lokal.
+    """
+    global PERCENTAGE_DOWNLOADED
+    download_url = SERVER_URL + "/" + data.get("download_url").lstrip("/")
+
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.settimeout(2.0)
+        client.connect(("127.0.0.1", 58888))
+        payload = f"TRIGGER_UPDATE:{download_url}"
+        client.sendall(payload.encode("utf-8"))
+
+        # Menerima balasan persentase dari Service dan memperbarui variabel agent
+        response = client.recv(1024).decode("utf-8").strip()
+        if response:
+            try:
+                PERCENTAGE_DOWNLOADED = float(response)
+            except ValueError:
+                pass
+
+        client.close()
+    except Exception as e:
+        print(f"[IPC ERROR] Gagal mengirim instruksi update ke Service: {e}")
+
 
 @sio.on("command")  # type: ignore
 async def on_command(data):
@@ -310,6 +334,8 @@ async def send_telemetry_loop():
                 ram_usage_mb = process.memory_info().rss / (1024 * 1024)
 
                 telemetry_data = get_system_telemetry()
+                telemetry_data['agent_version'] = AGENT_VERSION
+                telemetry_data['percentage_downloaded'] = PERCENTAGE_DOWNLOADED
                 payload = {
                     "telemetry": telemetry_data,
                     "image": None,
@@ -379,14 +405,16 @@ async def download_and_apply_ota(download_url: str):
 
 
 async def main():
-    global SERVER_URL
+    global SERVER_URL, AGENT_VERSION
     log_info("=== WATCHERS AGENT CLIENT STARTED ===")
 
     # Muat konfigurasi dari %ProgramData%
     config = load_config()
     print(f"[*] Konfigurasi dimuat dari {config}", flush=True)
     SERVER_URL = config.get("SERVER_URL")
+    AGENT_VERSION = config.get("VERSION")
     print(f"[*] Menggunakan SERVER_URL: {SERVER_URL}", flush=True)
+    print(f"[*] Menggunakan VERSION: {AGENT_VERSION}", flush=True)
 
     print(f"[*] Menghubungkan ke Server: {SERVER_URL}")
     await asyncio.gather(connect_with_retry(), send_telemetry_loop())
@@ -395,6 +423,7 @@ async def main():
 if __name__ == "__main__":
     # Memastikan ekskusi kode di file itu berada di program data
     fix_environment()
+
     # 1. Mode GUI Pengaturan Server (Jalankan secara synchronous tanpa qasync)
     if len(sys.argv) > 1 and sys.argv[1] == "--config":
         app = QApplication(sys.argv)
