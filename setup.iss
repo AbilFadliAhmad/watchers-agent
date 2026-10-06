@@ -1,14 +1,15 @@
-
-; ================================================================
-; DEFINISI VERSI APLIKASI
-; ================================================================
+// Copyright (c) 2026 Abil Fadli Ahmad (Watchers Security). All rights reserved.
+// ================================================================
+// DEFINISI VERSI APLIKASI
+// ================================================================
 #define AppVer "1.3.0"
 #define AppArch "x64"
 
 [Setup]
 AppName=Watchers Client Agent
-AppVersion=1.3.0
+AppVersion={#AppVer}
 AppPublisher=Watchers Security
+AppCopyright=Copyright © 2026 Abil Fadli Ahmad (Watchers Security)
 DefaultDirName={commonappdata}\WatchersAgent
 OutputBaseFilename=WatchersAgent_SetupV26
 Compression=lzma2/ultra64
@@ -39,7 +40,7 @@ Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 ; Shortcut untuk Mode Pengaturan Server (--config) di folder instalasi {app}
-Name: "{app}\Pengaturan Server Watchers"; Filename: "{app}\WatchersAgent.exe"; Parameters: "--config"; Comment: "Ubah Konfigurasi Server WatchersAgent"
+Name: "{app}\Pengaturan URL Server Watchers"; Filename: "{app}\WatchersAgent.exe"; Parameters: "--config"; Comment: "Ubah Konfigurasi Server WatchersAgent"
 
 [Run]
 ; 1. Instalasi VC++ Redistributable jika belum ada
@@ -48,14 +49,17 @@ Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /passive /norestart";
 ; 2. Tambahkan Exclusion Path ke Windows Defender
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -NoProfile -Command Add-MpPreference -ExclusionPath '{app}'"; Flags: runhidden
 
-
-
 [Code]
 var
   ConfigPage: TWizardPage;
   ProtocolCombo: TComboBox;
   DomainEdit: TNewEdit;
   DisableSleepCheck: TNewCheckBox;
+
+  // === VARIABEL PENAMPUNG STATE KONFIGURASI (BARU) ===
+  SavedProtocolIndex: Integer;
+  SavedDomain: string;
+  SavedDisableSleep: Boolean;
 
 // ================================================================
 // Check VC++ Installed
@@ -67,6 +71,84 @@ begin
   Result := RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) and (Installed = 1);
   if not Result then
     Result := RegQueryDWordValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) and (Installed = 1);
+end;
+
+// ================================================================
+// HELPER: PARSER NILAI SEDERHANA DARI JSON
+// ================================================================
+function ExtractJsonValue(JsonStr, Key, DefaultVal: string): string;
+var
+  P, PStart: Integer;
+  SearchKey: string;
+begin
+  Result := DefaultVal;
+  SearchKey := '"' + Key + '"';
+  P := Pos(SearchKey, JsonStr);
+  if P > 0 then
+  begin
+    P := P + Length(SearchKey);
+    while (P <= Length(JsonStr)) and (JsonStr[P] <> ':') do Inc(P);
+    Inc(P);
+    while (P <= Length(JsonStr)) and ((JsonStr[P] = ' ') or (JsonStr[P] = #9) or (JsonStr[P] = #13) or (JsonStr[P] = #10)) do Inc(P);
+    
+    if (P <= Length(JsonStr)) and (JsonStr[P] = '"') then
+    begin
+      Inc(P);
+      PStart := P;
+      while (P <= Length(JsonStr)) and (JsonStr[P] <> '"') do Inc(P);
+      Result := Copy(JsonStr, PStart, P - PStart);
+    end
+    else
+    begin
+      PStart := P;
+      while (P <= Length(JsonStr)) and (JsonStr[P] <> ',') and (JsonStr[P] <> '}') and (JsonStr[P] <> #13) and (JsonStr[P] <> #10) do Inc(P);
+      Result := Trim(Copy(JsonStr, PStart, P - PStart));
+    end;
+  end;
+end;
+
+// ================================================================
+// MEMBACA CONFIG.JSON LAMA JIKA TERSEDIA, JIKA TIDAK PAKAI DEFAULT
+// ================================================================
+procedure LoadExistingConfig();
+var
+  ConfigPath, JsonContent, ServerUrlVal, DisableSleepVal: string;
+begin
+  // Set nilai default awal
+  SavedProtocolIndex := 1; // Default: https://
+  SavedDomain := 'localhost:3000';
+  SavedDisableSleep := True;
+
+  ConfigPath := ExpandConstant('{app}\config.json');
+  if FileExists(ConfigPath) then
+  begin
+    if LoadStringFromFile(ConfigPath, JsonContent) then
+    begin
+      // Baca SERVER_URL
+      ServerUrlVal := ExtractJsonValue(JsonContent, 'SERVER_URL', '');
+      if ServerUrlVal <> '' then
+      begin
+        if Pos('http://', ServerUrlVal) = 1 then
+        begin
+          SavedProtocolIndex := 1;
+          Delete(ServerUrlVal, 1, 7);
+        end
+        else if Pos('https://', ServerUrlVal) = 1 then
+        begin
+          SavedProtocolIndex := 0;
+          Delete(ServerUrlVal, 1, 8);
+        end;
+        SavedDomain := ServerUrlVal;
+      end;
+
+      // Baca DISABLE_SLEEP
+      DisableSleepVal := Lowercase(ExtractJsonValue(JsonContent, 'DISABLE_SLEEP', 'true'));
+      if DisableSleepVal = 'false' then
+        SavedDisableSleep := False
+      else
+        SavedDisableSleep := True;
+    end;
+  end;
 end;
 
 // ================================================================
@@ -124,7 +206,7 @@ begin
   ProtocolCombo.Style := csDropDownList;
   ProtocolCombo.Items.Add('https://');
   ProtocolCombo.Items.Add('http://');
-  ProtocolCombo.ItemIndex := 0; // Default: https://
+  ProtocolCombo.ItemIndex := SavedProtocolIndex; // Terisi otomatis
   ProtocolCombo.Left := 0;
   ProtocolCombo.Top := LblProtocol.Top + LblProtocol.Height + 6;
   ProtocolCombo.Width := 120;
@@ -138,19 +220,18 @@ begin
 
   DomainEdit := TNewEdit.Create(ConfigPage);
   DomainEdit.Parent := ConfigPage.Surface;
-  DomainEdit.Text := 'watchers.tebaslahandev.my.id';
+  DomainEdit.Text := SavedDomain; // Terisi otomatis
   DomainEdit.Left := 0;
   DomainEdit.Top := LblDomain.Top + LblDomain.Height + 6;
   DomainEdit.Width := ConfigPage.SurfaceWidth;
 
-  // CHECKBOX OPSI MENCEGAH SLEEP
   DisableSleepCheck := TNewCheckBox.Create(ConfigPage);
   DisableSleepCheck.Parent := ConfigPage.Surface;
   DisableSleepCheck.Caption := 'Matikan Fitur Sleep & Sembunyikan Tombol Sleep di Start Menu';
   DisableSleepCheck.Left := 0;
   DisableSleepCheck.Top := DomainEdit.Top + DomainEdit.Height + 16;
   DisableSleepCheck.Width := ConfigPage.SurfaceWidth;
-  DisableSleepCheck.Checked := True; // Default tercentang
+  DisableSleepCheck.Checked := SavedDisableSleep; // Terisi otomatis
 end;
 
 // ================================================================
@@ -187,7 +268,7 @@ end;
 // ================================================================
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ProtocolStr, DomainStr, FullUrl, ConfigPath, JsonContent: string;
+  ProtocolStr, DomainStr, FullUrl, ConfigPath, JsonContent, DisableSleepStr: string;
   AppExePath, NssmPath, WatchersServiceExe: string;
   ResultCode: Integer;
 begin
@@ -195,36 +276,45 @@ begin
   begin
     ConfigPath := ExpandConstant('{app}\config.json');
 
-    // 1. TULIS CONFIG.JSON HANYA JIKA FILE BELUM ADA
-    if not FileExists(ConfigPath) then
+    // Jika mode GUI interaktif, ambil nilai terbaru dari wizard
+    if not WizardIsSilent() then
     begin
-      if ProtocolCombo.ItemIndex = 1 then
-        ProtocolStr := 'http://'
-      else
-        ProtocolStr := 'https://';
-
-      DomainStr := Trim(DomainEdit.Text);
-
-      if Pos('http://', DomainStr) = 1 then
-        Delete(DomainStr, 1, 7);
-      if Pos('https://', DomainStr) = 1 then
-        Delete(DomainStr, 1, 8);
-
-      FullUrl := ProtocolStr + DomainStr;
-
-      JsonContent := '{' + #13#10 +
-                     '    "SERVER_URL": "' + FullUrl + '",' + #13#10 +
-                     '    "RECONNECT_INTERVAL": 3' + #13#10 +
-                     '}';
-
-      SaveStringToFile(ConfigPath, JsonContent, False);
+      SavedProtocolIndex := ProtocolCombo.ItemIndex;
+      SavedDomain := Trim(DomainEdit.Text);
+      SavedDisableSleep := DisableSleepCheck.Checked;
     end;
 
-    // 2. TERAPKAN PENGATURAN ANTI-SLEEP JIKA CHECKBOX DICENTANG
-    if DisableSleepCheck.Checked then
-    begin
-      ApplyNoSleepSettings();
-    end;
+    // Bersihkan prefix protokol jika diketik di input textfield
+    if Pos('http://', SavedDomain) = 1 then Delete(SavedDomain, 1, 7);
+    if Pos('https://', SavedDomain) = 1 then Delete(SavedDomain, 1, 8);
+
+    if SavedProtocolIndex = 1 then
+      ProtocolStr := 'http://'
+    else
+      ProtocolStr := 'https://';
+
+    FullUrl := ProtocolStr + SavedDomain;
+
+    if SavedDisableSleep then
+      DisableSleepStr := 'true'
+    else
+      DisableSleepStr := 'false';
+
+    // 1. TULIS / REWRITE CONFIG.JSON DENGAN VERSI DAN OPSI TERBARU
+    JsonContent := '{' + #13#10 +
+                   '    "SERVER_URL": "' + FullUrl + '",' + #13#10 +
+                   '    "DISABLE_SLEEP": ' + DisableSleepStr + ',' + #13#10 +
+                   '    "VERSION": "{#AppVer}",' + #13#10 +
+                   '    "RECONNECT_INTERVAL": 3' + #13#10 +
+                   '}';
+
+    SaveStringToFile(ConfigPath, JsonContent, False);
+
+    // 2. TERAPKAN ATAU PULIHKAN PENGATURAN SLEEP
+    if SavedDisableSleep then
+      ApplyNoSleepSettings()
+    else
+      RestoreSleepSettings();
 
     // Variabel Path Aplikasi
     AppExePath := ExpandConstant('{app}\WatchersAgent.exe');
@@ -272,6 +362,8 @@ end;
 function InitializeSetup(): Boolean;
 begin
   Result := True;
+  LoadExistingConfig();
+
   // Hentikan service & proses
   StopAndCleanupEverything();
 
