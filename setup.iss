@@ -108,45 +108,57 @@ begin
 end;
 
 // ================================================================
-// MEMBACA CONFIG.JSON LAMA JIKA TERSEDIA, JIKA TIDAK PAKAI DEFAULT
+// MEMBACA CONFIG.JSON DENGAN PENANGANAN ERROR (TRY-EXCEPT)
 // ================================================================
 procedure LoadExistingConfig();
 var
   ConfigPath, JsonContent, ServerUrlVal, DisableSleepVal: string;
 begin
-  // Set nilai default awal
-  SavedProtocolIndex := 1; // Default: https://
-  SavedDomain := 'localhost:3000';
+  // 1. Set nilai default awal
+  SavedProtocolIndex := 0; // Default: https://
+  SavedDomain := 'watchers.tebaslahandev.my.id';
   SavedDisableSleep := True;
 
   ConfigPath := ExpandConstant('{app}\config.json');
+
   if FileExists(ConfigPath) then
   begin
-    if LoadStringFromFile(ConfigPath, JsonContent) then
-    begin
-      // Baca SERVER_URL
-      ServerUrlVal := ExtractJsonValue(JsonContent, 'SERVER_URL', '');
-      if ServerUrlVal <> '' then
+    // Membungkus pembacaan file dengan try-except agar aman dari crash
+    try
+      if LoadStringFromFile(ConfigPath, JsonContent) then
       begin
-        if Pos('http://', ServerUrlVal) = 1 then
+        // Validasi sederhana: pastikan file tidak kosong atau hanya berisi whitespace
+        JsonContent := Trim(JsonContent);
+        if JsonContent <> '' then
         begin
-          SavedProtocolIndex := 1;
-          Delete(ServerUrlVal, 1, 7);
-        end
-        else if Pos('https://', ServerUrlVal) = 1 then
-        begin
-          SavedProtocolIndex := 0;
-          Delete(ServerUrlVal, 1, 8);
-        end;
-        SavedDomain := ServerUrlVal;
-      end;
+          // Baca SERVER_URL
+          ServerUrlVal := ExtractJsonValue(JsonContent, 'SERVER_URL', '');
+          if ServerUrlVal <> '' then
+          begin
+            if Pos('http://', ServerUrlVal) = 1 then
+            begin
+              SavedProtocolIndex := 1;
+              Delete(ServerUrlVal, 1, 7);
+            end
+            else if Pos('https://', ServerUrlVal) = 1 then
+            begin
+              SavedProtocolIndex := 0;
+              Delete(ServerUrlVal, 1, 8);
+            end;
+            SavedDomain := ServerUrlVal;
+          end;
 
-      // Baca DISABLE_SLEEP
-      DisableSleepVal := Lowercase(ExtractJsonValue(JsonContent, 'DISABLE_SLEEP', 'true'));
-      if DisableSleepVal = 'false' then
-        SavedDisableSleep := False
-      else
-        SavedDisableSleep := True;
+          // Baca DISABLE_SLEEP
+          DisableSleepVal := Lowercase(ExtractJsonValue(JsonContent, 'DISABLE_SLEEP', 'true'));
+          if DisableSleepVal = 'false' then
+            SavedDisableSleep := False
+          else
+            SavedDisableSleep := True;
+        end;
+      end;
+    except
+      // Jika file corrupt atau gagal diekstrak, catat di log installer dan gunakan nilai default
+      Log('WARNING: File config.json corrupt atau tidak dapat dibaca. Menggunakan nilai konfigurasi default.');
     end;
   end;
 end;
