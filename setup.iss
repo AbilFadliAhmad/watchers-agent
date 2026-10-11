@@ -11,7 +11,7 @@ AppVersion={#AppVer}
 AppPublisher=Watchers Security
 AppCopyright=Copyright © 2026 Abil Fadli Ahmad (Watchers Security)
 DefaultDirName={commonappdata}\WatchersAgent
-OutputBaseFilename=WatchersAgent_SetupV26
+OutputBaseFilename=WatchersAgent-v{#AppVer}-{#AppArch}
 Compression=lzma2/ultra64
 SolidCompression=yes
 PrivilegesRequired=admin
@@ -112,7 +112,8 @@ end;
 // ================================================================
 procedure LoadExistingConfig();
 var
-  ConfigPath, JsonContent, ServerUrlVal, DisableSleepVal: string;
+  ConfigPath, ServerUrlVal, DisableSleepVal: string;
+  JsonContent: AnsiString;
 begin
   // 1. Set nilai default awal
   SavedProtocolIndex := 0; // Default: https://
@@ -280,7 +281,7 @@ end;
 // ================================================================
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ProtocolStr, DomainStr, FullUrl, ConfigPath, JsonContent, DisableSleepStr: string;
+  ProtocolStr, FullUrl, ConfigPath, JsonContent, DisableSleepStr: string;
   AppExePath, NssmPath, WatchersServiceExe: string;
   ResultCode: Integer;
 begin
@@ -289,7 +290,7 @@ begin
     ConfigPath := ExpandConstant('{app}\config.json');
 
     // Jika mode GUI interaktif, ambil nilai terbaru dari wizard
-    if not WizardIsSilent() then
+    if not WizardSilent() then
     begin
       SavedProtocolIndex := ProtocolCombo.ItemIndex;
       SavedDomain := Trim(DomainEdit.Text);

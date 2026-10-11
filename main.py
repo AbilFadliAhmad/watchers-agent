@@ -187,20 +187,22 @@ async def on_update_config(data):
             "interval": float(data["fullscreen"]["interval"]),
         }
 
-@sio.on("trigger_update")
+@sio.on("trigger_update") # type: ignore
 def on_trigger_update(data):
     """Menerima event update dari Socket IO, meneruskannya ke WatchersService,
 
     dan memperbarui variabel percentage_downloaded lokal.
     """
     global PERCENTAGE_DOWNLOADED
-    download_url = SERVER_URL + "/" + data.get("download_url").lstrip("/")
+
+    download_url = SERVER_URL + "/" + data.get("download_url").lstrip("/") # type: ignore
+    sha256_hash = data.get("sha256", "")
 
     try:
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.settimeout(2.0)
         client.connect(("127.0.0.1", 58888))
-        payload = f"TRIGGER_UPDATE:{download_url}"
+        payload = f"TRIGGER_UPDATE:{download_url}:{sha256_hash}"
         client.sendall(payload.encode("utf-8"))
 
         # Menerima balasan persentase dari Service dan memperbarui variabel agent
@@ -221,7 +223,6 @@ async def on_command(data):
     global lock_widget, CURRENT_MODE, IS_LOCKED
     print(f"[*] Perintah diterima: {data}", flush=True)
     log_info(f"[COMMAND RECEIVED] {data}")
-
     action = data.get("action")
 
     if action == "shutdown":
@@ -263,8 +264,8 @@ async def on_command(data):
         IS_LOCKED = False
         lock_widget = safe_cleanup_widget(lock_widget)
         print("[*] Layar siswa dibuka.", flush=True)
-
     elif action == "set_mode":
+        print("Terselesaikan tidak")
         CURRENT_MODE = data.get("mode", "grid")
         log_info(f"[COMMAND] Mode diubah ke: {CURRENT_MODE}")
 
@@ -342,6 +343,7 @@ async def send_telemetry_loop():
                     "device_id": DEVICE_ID,
                 }
 
+                screen_bytes = b""
                 if not IS_LOCKED:
                     screen_bytes = capture_screen_bytes(
                         quality=cfg["quality"], scale=cfg["scale"]
