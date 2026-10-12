@@ -2,7 +2,7 @@
 // ================================================================
 // DEFINISI VERSI APLIKASI
 // ================================================================
-#define AppVer "1.3.0"
+#define AppVer "1.5.0"
 #define AppArch "x64"
 
 [Setup]
@@ -116,12 +116,12 @@ var
   JsonContent: AnsiString;
 begin
   // 1. Set nilai default awal
-  SavedProtocolIndex := 0; // Default: https://
-  SavedDomain := 'watchers.tebaslahandev.my.id';
+  SavedProtocolIndex := 1; // Default: http://
+  SavedDomain := '127.0.0.1:8003';
   SavedDisableSleep := True;
 
-  ConfigPath := ExpandConstant('{app}\config.json');
-
+  ConfigPath := ExpandConstant('{commonappdata}\WatchersAgent\config.json');
+  
   if FileExists(ConfigPath) then
   begin
     // Membungkus pembacaan file dengan try-except agar aman dari crash
