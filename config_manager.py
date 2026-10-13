@@ -49,9 +49,3 @@ def load_config() -> dict:
     except Exception as e:
         print(f"[!] Gagal membaca config.json, menggunakan default: {e}")
         return DEFAULT_CONFIG
-
-
-def restart_process():
-    """Menghentikan proses saat ini agar NSSM / Watchdog menyalakannya kembali."""
-    print("[*] Merestart WatchersAgent...")
-    os._exit(0)

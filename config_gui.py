@@ -1,5 +1,6 @@
+import os
 import sys
-from config_manager import load_config, restart_process, save_config
+from config_manager import load_config, save_config
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
@@ -146,6 +147,9 @@ class ConfigWindow(QWidget):
         self.url_input.setFocus()
         self.url_input.selectAll()
 
+        # BARIS BARU: Eksekusi simpan saat Enter ditekan di url_input
+        self.url_input.returnPressed.connect(self.handle_save)
+
     def handle_save(self):
         new_url = self.url_input.text().strip()
         if not new_url.startswith(("http://", "https://")):
@@ -164,8 +168,21 @@ class ConfigWindow(QWidget):
             "Berhasil",
             "Pengaturan disimpan. WatchersAgent akan merekonfigurasi ulang sekarang.",
         )
+
+        # Coba hentikan proses WatchersAgent agar NSSM / Watchdog menyalakannya kembali
+        try:
+            import subprocess
+            CREATE_NO_WINDOW = 0x08000000
+            subprocess.run(
+                "taskkill /F /IM WatchersAgent.exe",
+                shell=True,
+                creationflags=CREATE_NO_WINDOW
+            )
+        except Exception as e:
+            print(f"[!] Gagal merestart WatchersAgent: {e}")
+
         self.close()
-        restart_process()
+        os._exit(0) # Keluar dari aplikasi
 
 
 def open_config_gui():

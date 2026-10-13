@@ -2,7 +2,7 @@
 // ================================================================
 // DEFINISI VERSI APLIKASI
 // ================================================================
-#define AppVer "2.0.0"
+#define AppVer "2.5.0"
 #define AppArch "x64"
 
 [Setup]
@@ -335,7 +335,7 @@ begin
     WatchersServiceExe := ExpandConstant('{app}\WatchersService.exe');
 
     // 3. DAFTARKAN TASK SCHEDULER INTERAKTIF
-    Exec('schtasks.exe', '/create /tn "WatchersAgentTask" /tr "' + AppExePath + '" /sc ONCE /st 00:00 /rl highest /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('schtasks.exe', '/create /tn "WatchersAgentTask" /tr "' + AppExePath + '" /sc ONCE /st 00:00 /rl highest /ru "USERS" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
     // 4. DAFTARKAN & JALANKAN WATCHERS SERVICE
     Exec(NssmPath, 'install WatchersService "' + WatchersServiceExe + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -364,7 +364,7 @@ begin
   Exec('schtasks.exe', '/delete /tn "WatchersAgentTask" /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // 3. Matikan semua proses aktif
-  Exec('taskkill.exe', '/F /T /IM WatchersService.exe /IM WatchersAgent.exe /IM nssm.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM WatchersService.exe /IM WatchersAgent.exe /IM nssm.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // 4. KEMBALIKAN PENGATURAN SLEEP KE NORMAL
   RestoreSleepSettings();
@@ -391,16 +391,10 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  AppDir: string;
-  ResultCode: Integer;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    AppDir := ExpandConstant('{commonappdata}\WatchersAgent');
-    if DirExists(AppDir) then
-    begin
-      Exec('cmd.exe', '/c rmdir /s /q "' + AddQuotes(AppDir) + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    end;
+    // PANGGIL CleanFolderExceptConfig() agar SEMUA FILE DIHAPUS KECUALI config.json
+    CleanFolderExceptConfig();
   end;
 end;
